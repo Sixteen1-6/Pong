@@ -3,13 +3,13 @@ Contact Info
 
 Group Members & Email Addresses:
 
-    Person 1, person1@uky.edu
-    Person 2, person2@uky.edu
+    Shubhanshu Pokharel, spo283@uky.edu 
+    Aaron Lin, ayli222@uky.edu Ayham Yousef afyo223@uky.edu
 
 Versioning
 ==========
 
-Github Link: 
+Github Link: https://github.com/Sixteen1-6/Pong
 
 General Info
 ============

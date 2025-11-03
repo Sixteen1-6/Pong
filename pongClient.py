@@ -1,6 +1,6 @@
 # =================================================================================================
 # Contributing Authors:	    Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
-# Email Addresses:          <spo283@uky.edu>, <
+# Email Addresses:          <spo283@uky.edu>, <ayli222@uky.edu> , <afyo223@uky.edu>
 # Date:                     <3 November 2025>
 # Purpose:                  <Client Side for multiplayer Pong Game with Play Again and Cryptography>
 # Misc:                     <Not Required.  Anything else you might want to include>
@@ -15,6 +15,7 @@ from assets.code.helperCode import *
 import time
 import ssl # socket wrapper for encryption 
 import hashlib # for hashing SHA256 Passwords
+import json # for serializing data to send over socket
 
 
 
@@ -75,6 +76,12 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # Getting keypress events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                #send quit message to server here
+                try: 
+                    quitMessage = {'action':'quit'} # construct quit message as dictionary
+                    client.send(json.dumps(quitMessage).encode('utf-8'))
+                except Exception:
+                    pass
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
@@ -83,6 +90,15 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
                 elif event.key == pygame.K_UP:
                     playerPaddleObj.moving = "up"
+                # Handle play again keypress
+                elif event.key == pygame.K_SPACE and gameOver and not playAgainSent:
+                    playAgainMessage = {'action':'play_again', 'response': 'yes'} # construct play again message as dictionary
+                    client.send(json.dumps(playAgainMessage).encode('utf-8'))
+                    playAgainSent = True
+                elif event.key == pygame.K_n and gameOver and not playAgainSent:
+                    playAgainMessage = {'action':'play_again', 'response': 'no'} # construct play again message as dictionary
+                    client.send(json.dumps(playAgainMessage).encode('utf-8'))
+                    playAgainSent = True
 
             elif event.type == pygame.KEYUP:
                 playerPaddleObj.moving = ""
@@ -91,7 +107,62 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # Your code here to send an update to the server on your paddle's information,
         # where the ball is and the current score.
         # Feel free to change when the score is updated to suit your needs/requirements
-        
+        if not gameOver:
+            clientMessage = {
+                'action': 'update',
+                'sync': sync,
+                'paddle_x': playerPaddleObj.rect.x,
+                'paddle_y': playerPaddleObj.rect.y,
+                'ball_x': ball.rect.x,
+                'ball_y': ball.rect.y,
+                'lScore': lScore,
+                'rScore': rScore,
+                'playerSide': playerPaddle
+            }
+            # send the message as a JSON string
+            jsonMessage = json.dumps(clientMessage)
+            client.send(jsonMessage.encode('utf-8'))
+            #Receive server update
+            recievedData = client.recv(1024).decode('utf-8') # buffer size of 1024 byte
+            serverUpdate = json.loads(recievedData) # parse JSON string to dictionary
+
+            #check if Game should restart
+            if serverUpdate.get('action') == 'restart':
+                gameOver = False
+                playAgainSent = False
+                lScore = 0
+                rScore = 0
+                ball.reset(nowGoing="left")
+                playerPaddleObj.rect.y = paddleStartPosY
+                opponentPaddleObj.rect.y = paddleStartPosY
+                continue # skip rest of loop to avoid updating positions before restart
+            #update Game state
+            opponentPaddleObj.rect.x = serverUpdate['opponentX']
+            opponentPaddleObj.rect.y = serverUpdate['opponentY']
+            ball.rect.x = serverUpdate['ballX']
+            ball.rect.y = serverUpdate['ballY']
+            lScore = serverUpdate['lScore']
+            rScore = serverUpdate['rScore']
+
+            sync= serverUpdate['sync']
+        else: # Game is over
+            try:
+                client.settimeout(0.1) # set timeout to avoid blocking indefinitely
+                recievedData = client.recv(1024).decode('utf-8')
+                if recievedData:
+                    serverUpdate = json.loads(recievedData)
+                    if serverUpdate.get('action') == 'restart':
+                        gameOver = False
+                        playAgainSent = False
+                        lScore = 0
+                        rScore = 0
+                        ball.reset(nowGoing="left")
+                        playerPaddleObj.rect.y = paddleStartPosY
+                        opponentPaddleObj.rect.y = paddleStartPosY
+                    elif serverUpdate.get('action') == 'endGame':
+                        
+                        pygame.quit()
+                        sys.exit()       
         
         # =========================================================================================
 
