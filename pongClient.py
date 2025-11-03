@@ -1,8 +1,8 @@
 # =================================================================================================
-# Contributing Authors:	    <Anyone who touched the code>
-# Email Addresses:          <Your uky.edu email addresses>
-# Date:                     <The date the file was last edited>
-# Purpose:                  <How this file contributes to the project>
+# Contributing Authors:	    Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Email Addresses:          <spo283@uky.edu>, <
+# Date:                     <3 November 2025>
+# Purpose:                  <Client Side for multiplayer Pong Game with Play Again and Cryptography>
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
@@ -12,6 +12,12 @@ import sys
 import socket
 
 from assets.code.helperCode import *
+import time
+import ssl # socket wrapper for encryption 
+import hashlib # for hashing SHA256 Passwords
+
+
+
 
 # This is the main game loop.  For the most part, you will not need to modify this.  The sections
 # where you should add to the code are marked.  Feel free to change any part of this project
@@ -59,6 +65,8 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
     rScore = 0
 
     sync = 0
+    gameOver = False # for play again feature
+    playAgainSent = False
 
     while True:
         # Wiping the screen
