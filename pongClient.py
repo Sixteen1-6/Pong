@@ -23,7 +23,7 @@ import json # for serializing data to send over socket
 # This is the main game loop.  For the most part, you will not need to modify this.  The sections
 # where you should add to the code are marked.  Feel free to change any part of this project
 # to suit your needs.
-def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
+def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:ssl.SSLSocket, authToken:str) -> None:
     
     # Pygame inits
     pygame.mixer.pre_init(44100, -16, 2, 2048)
@@ -78,7 +78,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
             if event.type == pygame.QUIT:
                 #send quit message to server here
                 try: 
-                    quitMessage = {'action':'quit'} # construct quit message as dictionary
+                    quitMessage = {'action':'quit', 'authToken': authToken} # construct quit message as dictionary
                     client.send(json.dumps(quitMessage).encode('utf-8'))
                 except Exception:
                     pass
@@ -92,11 +92,11 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                     playerPaddleObj.moving = "up"
                 # Handle play again keypress
                 elif event.key == pygame.K_SPACE and gameOver and not playAgainSent:
-                    playAgainMessage = {'action':'play_again', 'response': 'yes'} # construct play again message as dictionary
+                    playAgainMessage = {'action':'play_again', 'response': 'yes', 'authToken': authToken} # construct play again message as dictionary
                     client.send(json.dumps(playAgainMessage).encode('utf-8'))
                     playAgainSent = True
                 elif event.key == pygame.K_n and gameOver and not playAgainSent:
-                    playAgainMessage = {'action':'play_again', 'response': 'no'} # construct play again message as dictionary
+                    playAgainMessage = {'action':'play_again', 'response': 'no', 'authToken': authToken} # construct play again message as dictionary
                     client.send(json.dumps(playAgainMessage).encode('utf-8'))
                     playAgainSent = True
 
@@ -110,6 +110,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         if not gameOver:
             clientMessage = {
                 'action': 'update',
+                'authToken': authToken,
                 'sync': sync,
                 'paddle_x': playerPaddleObj.rect.x,
                 'paddle_y': playerPaddleObj.rect.y,
@@ -253,12 +254,23 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
 
 
+def makeTLSClient(ip:str) -> ssl.SSLSocket:
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    rawSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    return context.wrap_socket(rawSocket, server_hostname=ip)
+
+    
+
+def SHA256Hash(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 # This is where you will connect to the server to get the info required to call the game loop.  Mainly
 # the screen width, height and player paddle (either "left" or "right")
 # If you want to hard code the screen's dimensions into the code, that's fine, but you will need to know
 # which client is which
-def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
+def joinServer(ip:str, port:str, username:str, password:str, isRegister:bool, errorLabel:tk.Label, app:tk.Tk) -> None:
     # Purpose:      This method is fired when the join button is clicked
     # Arguments:
     # ip            A string holding the IP address of the server
@@ -268,15 +280,29 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     
     # Create the socket to connect to the server
     try:
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
         # Get the required information from your server (screen width, height & player paddle, "left or "right)
-
 
         # If you have messages you'd like to show the user use the errorLabel widget like so
         errorLabel.config(text=f"Connecting To: IP: {ip}, Port: {port}")
         errorLabel.update()   
+        client = makeTLSClient(ip)
         client.connect((ip, int(port)))
+
+        action = "register" if isRegister else "login"
+        authenticationData = {
+            "action": action,
+            "username": username,
+            "password": SHA256Hash(password)
+        }
+        client.send(json.dumps(authenticationData).encode('utf-8'))
+
+        authenticationResponse = client.recv(1024).decode('utf-8')
+        if not authenticationResponse.get("ok"):
+            raise RuntimeError(authenticationResponse.get("error","Authentication failed"))
+        
+        authenticationToken = authenticationResponse["authToken"]
+
+
         #update label and wait for  other player
         errorLabel.config(text="Connected! Waiting for other player...")
         errorLabel.update()
@@ -298,35 +324,52 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
 
 
 
-# This displays the opening screen, you don't need to edit this (but may if you like)
+# This displays the opening screen, simplified with login/register fields
 def startScreen():
     app = tk.Tk()
     app.title("Server Info")
 
     image = tk.PhotoImage(file="./assets/images/logo.png")
-
     titleLabel = tk.Label(image=image)
     titleLabel.grid(column=0, row=0, columnspan=2)
 
-    ipLabel = tk.Label(text="Server IP:")
-    ipLabel.grid(column=0, row=1, sticky="W", padx=8)
-
+    tk.Label(text="Server IP:").grid(column=0, row=1, sticky="W", padx=8)
     ipEntry = tk.Entry(app)
     ipEntry.grid(column=1, row=1)
 
-    portLabel = tk.Label(text="Server Port:")
-    portLabel.grid(column=0, row=2, sticky="W", padx=8)
-
+    tk.Label(text="Server Port:").grid(column=0, row=2, sticky="W", padx=8)
     portEntry = tk.Entry(app)
     portEntry.grid(column=1, row=2)
 
-    errorLabel = tk.Label(text="")
-    errorLabel.grid(column=0, row=4, columnspan=2)
+    tk.Label(text="Username:").grid(column=0, row=3, sticky="W", padx=8)
+    userEntry = tk.Entry(app)
+    userEntry.grid(column=1, row=3)
 
-    joinButton = tk.Button(text="Join", command=lambda: joinServer(ipEntry.get(), portEntry.get(), errorLabel, app))
-    joinButton.grid(column=0, row=3, columnspan=2)
+    tk.Label(text="Password:").grid(column=0, row=4, sticky="W", padx=8)
+    passEntry = tk.Entry(app, show="*")
+    passEntry.grid(column=1, row=4)
+
+    isRegisterVar = tk.BooleanVar(value=False)
+    tk.Checkbutton(app, text="Register new account?", variable=isRegisterVar).grid(column=0, row=5, columnspan=2)
+
+    errorLabel = tk.Label(text="")
+    errorLabel.grid(column=0, row=7, columnspan=2)
+
+    tk.Button(
+        text="Join",
+        command=lambda: joinServer(
+            ipEntry.get(),
+            portEntry.get(),
+            userEntry.get(),
+            passEntry.get(),
+            isRegisterVar.get(),
+            errorLabel,
+            app
+        )
+    ).grid(column=0, row=6, columnspan=2)
 
     app.mainloop()
+
 
 if __name__ == "__main__":
     startScreen()
