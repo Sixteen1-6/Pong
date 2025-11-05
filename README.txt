@@ -4,7 +4,8 @@ Contact Info
 Group Members & Email Addresses:
 
     Shubhanshu Pokharel, spo283@uky.edu 
-    Aaron Lin, ayli222@uky.edu Ayham Yousef afyo223@uky.edu
+    Aaron Lin, ayli222@uky.edu 
+    Ayham Yousef afyo223@uky.edu
 
 Versioning
 ==========
@@ -25,5 +26,4 @@ Run the following line to install the required libraries for this project:
 Known Bugs
 ==========
 - The server doesn't work because the logic isn't yet written.
-- The client doesn't speak to the server
 
