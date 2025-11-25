@@ -1,0 +1,13 @@
+# =================================================================================================
+# Multiplayer Pong Game - Requirements
+# Contributing Authors:     Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Email Addresses:          spo283@uky.edu, ayli222@uky.edu, afyo223@uky.edu
+# Date:                     11/25/2025
+# Purpose:                  Python package dependencies for multiplayer Pong game
+# =================================================================================================
+
+# Game Engine
+pygame>=2.5.0
+
+# Encryption and Security
+cryptography>=41.0.0
