@@ -1,7 +1,11 @@
 # =================================================================================================
-# Contributing Authors:     Authentication Module
-# Purpose:                  Authentication server for login/registration
+# Contributing Authors:     Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Email Addresses:          spo283@uky.edu, ayli222@uky.edu, afyo223@uky.edu
+# Date:                     11/25/2025
+# Purpose:                  Authentication server for login/registration with encrypted communication
+# Misc:                     Runs on port 8081, handles multiple clients using threading
 # =================================================================================================
+
 
 import socket
 import json
@@ -12,6 +16,12 @@ from encryption import encrypt_message, decrypt_message
 
 AUTH_PORT = 8081
 
+
+# Author:       Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose:      Handle authentication requests from clients (login/registration)
+# Pre:          client_socket (socket.socket) - connected client socket, 
+#               client_address - client's address tuple
+# Post:         Processes authentication request, sends encrypted response, closes socket
 def handle_auth_client(client_socket: socket.socket, client_address):
     """Handle authentication requests from clients."""
     try:
@@ -68,6 +78,11 @@ def handle_auth_client(client_socket: socket.socket, client_address):
     finally:
         client_socket.close()
 
+
+# Author:       Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose:      Start and run the authentication server
+# Pre:          AUTH_PORT available, required modules imported
+# Post:         Server listening on AUTH_PORT, spawns threads for each client connection
 def start_auth_server():
     """Start the authentication server."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
