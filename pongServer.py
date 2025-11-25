@@ -1,341 +1,546 @@
+# =================================================================================================
+# Contributing Authors:     Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Email Addresses:          spo283@uky.edu, ayli222@uky.edu, afyo223@uky.edu
+# Date:                     3 November 2025
+# Purpose:                  Server side for multiplayer Pong game with Play Again feature
+# Misc:                     Handles TCP game state sync and HTTP leaderboard hosting
+# =================================================================================================
+
 import socket
 import threading
 import json
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Tuple
 import time
 import http.server
 import socketserver
 
-# ------------------------------------------------------------------------------
-# Basic configuration
-# ------------------------------------------------------------------------------
-
-HOST = "localhost"    # game server address
-GAME_PORT = 5000      # match the port used by your Pong client
-HTTP_PORT = 8000      # port for leaderboard HTTP server (non-privileged)
-WIN_SCORE = 5         # points needed to win a game
-
-# ------------------------------------------------------------------------------
-# Shared state: games and leaderboard
-# ------------------------------------------------------------------------------
-
-class GameSession:
-    """
-    Represents a single Pong match between two players.
-
-    The design here follows the instructor's threaded chat server:
-    - one GameSession per match
-    - a small lock to coordinate updates between both player threads
-    """
-
-    def __init__(self, game_id: int):
-        self.game_id = game_id
-
-        # player info: side -> {"name": str, "sock": socket, "addr": (ip, port)}
-        self.players = {
-            "left": None,
-            "right": None,
-        }
-
-        # a simple, shared game state for both players
-        self.state = {
-            "sync": 0,                         # server-side tick counter
-            "paddles": {                       # paddle positions by side
-                "left": [0.0, 0.0],
-                "right": [0.0, 0.0],
-            },
-            "ball": [0.0, 0.0],                # last reported ball position
-            "score": {                         # logical scores by side
-                "left": 0,
-                "right": 0,
-            },
-            "running": True                    # set False to end the game
-        }
-
-        # used by both player threads to avoid race conditions
-        self.lock = threading.Lock()
-
-
-# all ongoing games, indexed by game_id
-games: dict[int, GameSession] = {}
-
-# used to pair players into games (similar idea to a “waiting room”)
-waiting_player = None  # (game_id, side)
-
-# used to hand out unique game IDs
-next_game_id = 1
-
-# leaderboard: player_name -> wins
-leaderboard: dict[str, int] = {}
 leaderboard_lock = threading.Lock()
 
+# -----------------------------------------------------------------------------------
+# Improved game state representation with Play Again support
+# -----------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
+SERVER_IP = "localhost"
+START_DELAY = .5
+
+@dataclass
+class Vec2:
+    """Represents a 2D vector/position with clear x,y semantics."""
+    x: float = 0.0
+    y: float = 0.0
+    
+    def to_list(self) -> list:
+        """Convert to [x, y] list for JSON serialization."""
+        return [self.x, self.y]
+    
+    @classmethod
+    def from_list(cls, data: list) -> 'Vec2':
+        """Create Vec2 from [x, y] list."""
+        return cls(x=data[0], y=data[1])
+
+
+@dataclass
+class PaddleState:
+    """Represents a single paddle's state."""
+    position: Vec2 = field(default_factory=Vec2)
+    
+    def to_list(self) -> list:
+        """Convert to [x, y] for JSON."""
+        return self.position.to_list()
+    
+    @classmethod
+    def from_list(cls, data: list) -> 'PaddleState':
+        """Create PaddleState from [x, y] list."""
+        return cls(position=Vec2.from_list(data))
+
+
+@dataclass
+class BallState:
+    """Represents the ball's state."""
+    position: Vec2 = field(default_factory=Vec2)
+    
+    def to_list(self) -> list:
+        """Convert to [x, y] for JSON."""
+        return self.position.to_list()
+    
+    @classmethod
+    def from_list(cls, data: list) -> 'BallState':
+        """Create BallState from [x, y] list."""
+        return cls(position=Vec2.from_list(data))
+
+
+@dataclass
+class Score:
+    """Represents the score for both players."""
+    left: int = 0
+    right: int = 0
+    
+    def to_list(self) -> list:
+        """Convert to [left, right] for JSON."""
+        return [self.left, self.right]
+    
+    @classmethod
+    def from_list(cls, data: list) -> 'Score':
+        """Create Score from [left, right] list."""
+        return cls(left=int(data[0]), right=int(data[1]))
+    
+    def winner(self) -> Optional[str]:
+        """Return 'left' or 'right' if someone won, else None."""
+        if self.left >= 5:
+            return "left"
+        elif self.right >= 5:
+            return "right"
+        return None
+    
+    def reset(self) -> None:
+        """Reset scores to 0."""
+        self.left = 0
+        self.right = 0
+
+
+@dataclass
+class GameState:
+    """
+    Improved game state representation with clear semantics.
+    """
+    sync: int = 0
+    left_paddle: PaddleState = field(default_factory=PaddleState)
+    right_paddle: PaddleState = field(default_factory=PaddleState)
+    ball: BallState = field(default_factory=BallState)
+    score: Score = field(default_factory=Score)
+    active: bool = False
+    game_over: bool = False
+    play_again: Optional[bool] = None  # None = no decision, True = yes, False = no
+    
+    def to_json_response(self) -> dict:
+        """
+        Convert game state to JSON format expected by client.
+        """
+        return {
+            "sync": self.sync,
+            "left": self.left_paddle.to_list(),
+            "right": self.right_paddle.to_list(),
+            "ball": self.ball.to_list(),
+            "score": self.score.to_list(),
+            "game_over": self.game_over,
+            "play_again": self.play_again
+        }
+    
+    def update_from_client(self, client_data: dict, is_left: bool) -> None:
+        """
+        Update game state from client data.
+        """
+        # Update sync counter
+        self.sync = client_data["sync"]
+        
+        # Update score (only if game is not over to prevent client manipulation)
+        if not self.game_over:
+            self.score = Score.from_list(client_data["score"])
+        
+        # Update play again decision if present
+        if "play_again" in client_data:
+            self.play_again = client_data["play_again"]
+        
+        # Update the paddle for the player who sent this data
+        paddle_data = PaddleState.from_list(client_data["paddle"])
+        if is_left:
+            self.left_paddle = paddle_data
+        else:
+            self.right_paddle = paddle_data
+        
+        # Update ball position (only from left player for authority and only if game not over)
+        if is_left and not self.game_over:
+            self.ball = BallState.from_list(client_data["ball"])
+    
+    def reset_for_new_game(self, screen_width: int, screen_height: int) -> None:
+        """Reset state for a new game."""
+        self.sync = 0
+        self.score.reset()
+        self.ball = BallState(position=Vec2(screen_width / 2, screen_height / 2))
+        self.game_over = False
+        self.play_again = None
+        self.active = True
+
+
+@dataclass
+class Game:
+    """
+    Represents a complete game between two players with Play Again support.
+    """
+    id: int
+    left_state: GameState = field(default_factory=GameState)
+    right_state: GameState = field(default_factory=GameState)
+    left_player: Optional[str] = None
+    right_player: Optional[str] = None
+    screen_width: int = 640
+    screen_height: int = 480
+    waiting_for_play_again: bool = False
+    rematch_processed: bool = False
+    game_lock: threading.Lock = field(default_factory=threading.Lock)
+    
+    def initialize(self, screen_width: int, screen_height: int) -> None:
+        """Initialize game with starting positions."""
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        center = Vec2(screen_width / 2, screen_height / 2)
+        
+        self.left_state.ball = BallState(position=Vec2(center.x, center.y))
+        self.right_state.ball = BallState(position=Vec2(center.x, center.y))
+        
+        self.left_state.active = True
+        self.right_state.active = True
+    
+    def get_state(self, is_left: bool) -> GameState:
+        """Get the appropriate state for the given player."""
+        return self.left_state if is_left else self.right_state
+    
+    def get_opponent_state(self, is_left: bool) -> GameState:
+        """Get the opponent's state."""
+        return self.right_state if is_left else self.left_state
+    
+    def is_active(self) -> bool:
+        """Check if game is still active."""
+        return self.left_state.active and self.right_state.active
+    
+    def mark_game_over(self) -> None:
+        """Mark game as over but keep connection alive for play again."""
+        with self.game_lock:
+            if not self.left_state.game_over:  # Only do this once
+                self.left_state.game_over = True
+                self.right_state.game_over = True
+                self.waiting_for_play_again = True
+                print(f"Game {self.id} marked as over, waiting for play again decisions")
+    
+    def both_want_rematch(self) -> bool:
+        """Check if both players want to play again."""
+        return (self.left_state.play_again is True and 
+                self.right_state.play_again is True)
+    
+    def either_declined(self) -> bool:
+        """Check if either player declined rematch."""
+        return (self.left_state.play_again is False or 
+                self.right_state.play_again is False)
+    
+    def both_decided(self) -> bool:
+        """Check if both players have made a decision."""
+        return (self.left_state.play_again is not None and 
+                self.right_state.play_again is not None)
+    
+    def reset_for_rematch(self) -> bool:
+        """
+        Reset game state for a rematch. 
+        Returns True if reset was performed, False if already processed.
+        """
+        with self.game_lock:
+            if self.rematch_processed:
+                return False  # Already reset by another thread
+            
+            self.rematch_processed = True
+            print(f"Resetting game {self.id} for rematch")
+            
+            self.left_state.reset_for_new_game(self.screen_width, self.screen_height)
+            self.right_state.reset_for_new_game(self.screen_width, self.screen_height)
+            self.waiting_for_play_again = False
+            
+            # Small delay to ensure clients receive game_over=False
+            time.sleep(0.1)
+            
+            self.rematch_processed = False  # Ready for next game
+            
+            return True
+    
+    def end_game(self) -> None:
+        """Permanently end the game and close connections."""
+        self.left_state.active = False
+        self.right_state.active = False
+
+
+# Global game manager
+class GameManager:
+    """Manages all active games."""
+    
+    def __init__(self):
+        self.games: Dict[int, Game] = {}
+        self.next_game_id = 0
+        self.lock = threading.Lock()
+    
+    def create_game(self) -> int:
+        """Create a new game and return its ID."""
+        with self.lock:
+            game_id = self.next_game_id
+            self.games[game_id] = Game(id=game_id)
+            self.next_game_id += 1
+            return game_id
+    
+    def get_game(self, game_id: int) -> Optional[Game]:
+        """Get a game by ID."""
+        return self.games.get(game_id)
+    
+    def remove_game(self, game_id: int) -> None:
+        """Remove a game from the manager."""
+        with self.lock:
+            if game_id in self.games:
+                del self.games[game_id]
+
+
+# Global instances
+game_manager = GameManager()
+leaderboard: Dict[str, int] = {}
+
+
 # Leaderboard utilities
-# ------------------------------------------------------------------------------
+def save_leaderboard() -> None:
+    """Write the current in-memory leaderboard to 'leaderboard.json'."""
+    with leaderboard_lock:
+        sorted_items = sorted(
+            leaderboard.items(), key=lambda x: x[1], reverse=True
+        )
+        with open("leaderboard.json", "w") as leaderboard_file:
+            leaderboard_file.write("[{}")
+            for player_name, score in sorted_items:
+                leaderboard_file.write(
+                    f',{{"name":"{player_name}","score":{score}}}\n'
+                )
+            leaderboard_file.write("]")
 
-def update_leaderboard(winner_name: str) -> None:
+
+def reset_leaderboard() -> None:
+    """Reset the in-memory leaderboard and overwrite file."""
+    global leaderboard
+    leaderboard = {}
+    with open("leaderboard.json", "w") as leaderboard_file:
+        leaderboard_file.write("[{}]")
+
+
+def load_leaderboard() -> None:
+    """Load leaderboard data from 'leaderboard.json'."""
+    global leaderboard
+    try:
+        with open("leaderboard.json", "r") as leaderboard_file:
+            temp_leaderboard = json.load(leaderboard_file)
+        leaderboard = {
+            item["name"]: item["score"]
+            for item in temp_leaderboard[1:]
+            if "name" in item and "score" in item
+        }
+    except (FileNotFoundError, json.JSONDecodeError, IndexError, KeyError):
+        leaderboard = {}
+
+
+# Client thread handler
+def clientThread(
+    name: str,
+    clientSocket: socket.socket,
+    clientAddress: Tuple,
+    gameId: int,
+    isLeft: bool,
+) -> None:
     """
-    Increment the winner's score and write out leaderboard.json.
-
-    The file format is a simple list of objects:
-        [{}, {"name": "Alice", "score": 3}, ...]
+    Handle all communication with a single client for the duration of a game session.
+    Now supports Play Again functionality.
     """
-
-
-# ------------------------------------------------------------------------------
-# HTTP server to expose leaderboard.json
-# ------------------------------------------------------------------------------
-
-def start_http_server() -> None:
-    """
-    Very small HTTP server that serves files from the current directory.
-    This follows the instructor's SimpleHTTPRequestHandler examples.
-    """
-
-# ------------------------------------------------------------------------------
-# Game logic helpers
-# ------------------------------------------------------------------------------
-
-def decide_winner(score_dict: dict[str, int]) -> str | None:
-    """
-    Given the internal score dictionary, decide if there is a winner.
-    Returns 'left', 'right', or None.
-    """
-
-
-def build_state_for_client(session: GameSession, side: str) -> dict:
-    """
-    Convert the internal GameSession.state into the JSON structure expected
-    by the Pong client. This keeps the JSON keys aligned with the client
-    while we are free to store things however we like internally.
-    """
-
-
-# ------------------------------------------------------------------------------
-# Per-player thread
-# ------------------------------------------------------------------------------
-
-def handle_player(session: GameSession, side: str) -> None:
-    """
-    Thread entry point for a single player in a GameSession.
-
-    Patterned after the instructor's threaded chat server:
-    - one thread per client
-    - each loop iteration: recv, process, send
-    """
-
-    player_info = session.players[side]
-    sock = player_info["sock"]
-    name = player_info["name"]
-    addr = player_info["addr"]
-
-    print(f"[GAME {session.game_id}] {name} ({side}) connected from {addr}")
-
-    # initial handshake: tell the client which side it is and the screen size
-    # (match these values with what your Pong client expects)
-    handshake = {
-        "side": side,
-        "width": 640,
-        "height": 480,
+    SCREEN_HEIGHT = 480
+    SCREEN_WIDTH = 640
+    
+    # Initialize leaderboard entry
+    leaderboard[name] = leaderboard.get(name, 0)
+    
+    # Get the game
+    game = game_manager.get_game(gameId)
+    if not game:
+        print(f"Error: Game {gameId} not found")
+        clientSocket.close()
+        return
+    
+    # Set player name
+    if isLeft:
+        game.left_player = name
+    else:
+        game.right_player = name
+    
+    # Initialize game
+    game.initialize(SCREEN_WIDTH, SCREEN_HEIGHT)
+    
+    # Send initial configuration
+    side_string = "left" if isLeft else "right"
+    preliminary_data = {
+        "side": side_string,
+        "height": SCREEN_HEIGHT,
+        "width": SCREEN_WIDTH,
     }
-    sock.send(json.dumps(handshake).encode())
+    clientSocket.send(json.dumps(preliminary_data).encode())
+    
+    # Get player's state object
+    player_state = game.get_state(isLeft)
+    opponent_state = game.get_opponent_state(isLeft)
+    
+    time.sleep(START_DELAY)
 
-    try:
-        while True:
-            # small delay to avoid busy-looping
-            time.sleep(0.01)
-
-            data = sock.recv(4096)
-            if not data:
-                # client disconnected
-                print(f"[GAME {session.game_id}] {name} disconnected")
-                break
-
-            try:
-                msg = json.loads(data.decode())
-            except json.JSONDecodeError:
-                print(f"[GAME {session.game_id}] Bad JSON from {name}: {data!r}")
-                continue
-
-            # Extract fields from client's message. These key names must match what
-            # your Pong client actually sends.
-            client_sync = msg.get("sync", 0)
-            client_score = msg.get("score", [0, 0])
-            client_paddle = msg.get("paddle", [0.0, 0.0])
-            client_ball = msg.get("ball", [0.0, 0.0])
-
-            with session.lock:
-                # Update server-side sync as a simple max of what we've seen.
-                # This is different from "copy opponent state if behind" and is
-                # more like a monotonic tick counter.
-                session.state["sync"] = max(session.state["sync"], client_sync)
-
-                # Update this player's paddle position
-                session.state["paddles"][side] = [
-                    float(client_paddle[0]),
-                    float(client_paddle[1]),
-                ]
-
-                # Trust the last reported ball position; whichever side sends last wins
-                session.state["ball"] = [
-                    float(client_ball[0]),
-                    float(client_ball[1]),
-                ]
-
-                # Update score if this update represents progress
-                # Map client score array to internal left/right
-                left_score, right_score = int(client_score[0]), int(client_score[1])
-
-                # Only accept a score update if the total has increased
-                current_total = session.state["score"]["left"] + session.state["score"]["right"]
-                new_total = left_score + right_score
-
-                if new_total >= current_total:
-                    session.state["score"]["left"] = left_score
-                    session.state["score"]["right"] = right_score
-
-                # Check for winner
-                winner_side = decide_winner(session.state["score"])
-                if winner_side is not None and session.state["running"]:
-                    session.state["running"] = False
-                    winner_name = session.players[winner_side]["name"]
-                    print(f"[GAME {session.game_id}] {winner_name} ({winner_side}) wins!")
-
-                    # record win in leaderboard
-                    update_leaderboard(winner_name)
-
-            # Build and send response based on the shared state
-            response = build_state_for_client(session, side)
-            sock.send(json.dumps(response).encode())
-
-            # If the game has ended, close this player's loop
-            if not session.state["running"]:
-                break
-
-    except (ConnectionResetError, OSError):
-        print(f"[GAME {session.game_id}] Connection error with {name}")
-
-    finally:
-        sock.close()
-        print(f"[GAME {session.game_id}] Closed socket for {name} ({side})")
-
-
-# ------------------------------------------------------------------------------
-# Connection handling: pairing players into games
-# ------------------------------------------------------------------------------
-
-def accept_and_pair_clients(server_socket: socket.socket) -> None:
-    """
-    Main loop for the game server.
-
-    This follows the instructor's pattern:
-    - accept a client
-    - create a thread to handle that client
-    - use a shared "waiting_player" to pair two clients into a GameSession
-    """
-    global waiting_player, next_game_id
-
-    print(f"[GAME SERVER] Listening on {HOST}:{GAME_PORT}")
-
-    while True:
-        conn, addr = server_socket.accept()
-
-        # first thing the client does: send its chosen name
+    winner_logged = False  # Track if we've already logged the winner
+    
+    # Main game loop - continues across multiple games
+    while game.is_active():
+        time.sleep(0.013)
+        
+        # Receive data from client
         try:
-            raw_name = conn.recv(1024)
-        except OSError:
-            conn.close()
-            continue
+            received = clientSocket.recv(1024)
+            if not received:
+                print(f"No data received; closing connection for {name}")
+                break
+            
+            data = json.loads(received.decode())
+            
+            # Update player's state from client data
+            player_state.update_from_client(data, isLeft)
+            
+            # Only process game logic if not in play again waiting state
+            if not game.waiting_for_play_again:
+                # Sync ball and opponent paddle from opponent's state
+                if not isLeft:
+                    # Right player gets ball from left player (authoritative)
+                    player_state.ball = BallState(
+                        position=Vec2(opponent_state.ball.position.x, 
+                                     opponent_state.ball.position.y)
+                    )
+                
+                # Get opponent paddle position
+                if isLeft:
+                    player_state.right_paddle = PaddleState(
+                        position=Vec2(opponent_state.right_paddle.position.x,
+                                     opponent_state.right_paddle.position.y)
+                    )
+                else:
+                    player_state.left_paddle = PaddleState(
+                        position=Vec2(opponent_state.left_paddle.position.x,
+                                     opponent_state.left_paddle.position.y)
+                    )
+                
+                # Sync check: if behind opponent, catch up
+                if player_state.sync < opponent_state.sync:
+                    player_state.sync = opponent_state.sync
+                    player_state.score = Score(left=opponent_state.score.left,
+                                              right=opponent_state.score.right)
+                
+                # Check for game end
+                winner = player_state.score.winner()
+                if winner and not winner_logged:
+                    game.mark_game_over()
+                    winner_logged = True
+                    print(f"Game {gameId} over. Winner: {winner}")
+                    
+                    # Update leaderboard for the winner
+                    if (isLeft and winner == "left") or (not isLeft and winner == "right"):
+                        leaderboard[name] = leaderboard.get(name, 0) + 1
+                        save_leaderboard()
+            
+            # Handle play again logic - only when waiting for decisions
+            elif game.waiting_for_play_again:
+                if game.both_decided():
+                    if game.both_want_rematch():
+                        # Only one thread should process the rematch
+                        if game.reset_for_rematch():
+                            print(f"Both players want rematch in game {gameId} - resetting")
+                            # Reset local references
+                            player_state = game.get_state(isLeft)
+                            opponent_state = game.get_opponent_state(isLeft)
+                        
+                        # IMPORTANT: do this for *both* threads
+                        winner_logged = False
+                                    
+                    elif game.either_declined():
+                        print(f"Rematch declined in game {gameId}")
+                        game.end_game()
+                                    
+                        # Send final response before closing
+                        response = player_state.to_json_response()
+                        clientSocket.send(json.dumps(response).encode())
+                        break
+            
+            # Send response back to client
+            response = player_state.to_json_response()
+            clientSocket.send(json.dumps(response).encode())
+                
+        except Exception as e:
+            print(f"Error in client thread for {name}: {e}")
+            break
+    
+    clientSocket.close()
+    print(f"Closed connection for {name}")
 
-        name = raw_name.decode().strip()
-        if not name or not name.isalnum():
-            print("[GAME SERVER] Rejected connection with invalid name")
-            conn.close()
-            continue
 
-        # Pair this player into a game session.
-        # We mimic a simple matchmaking queue using waiting_player.
-        with threading.Lock():  # short-lived lock for pairing
-            if waiting_player is None:
-                # Create new GameSession and assign this player as left
-                game_id = next_game_id
-                next_game_id += 1
-
-                session = GameSession(game_id)
-                games[game_id] = session
-
-                session.players["left"] = {
-                    "name": name,
-                    "sock": conn,
-                    "addr": addr,
-                }
-
-                waiting_player = (game_id, "left")
-                print(f"[GAME SERVER] {name} is waiting in game {game_id} as left")
-
-            else:
-                game_id, other_side = waiting_player
-                session = games[game_id]
-
-                # assign this player as the opposite side
-                side = "right" if other_side == "left" else "left"
-                session.players[side] = {
-                    "name": name,
-                    "sock": conn,
-                    "addr": addr,
-                }
-
-                print(f"[GAME SERVER] Game {game_id} matched: "
-                      f"{session.players['left']['name']} (left) vs "
-                      f"{session.players['right']['name']} (right)")
-
-                # clear waiting_player since we just formed a full game
-                waiting_player = None
-
-                # start threads for both players
-                left_thread = threading.Thread(
-                    target=handle_player,
-                    args=(session, "left"),
-                    daemon=True,
-                )
-                right_thread = threading.Thread(
-                    target=handle_player,
-                    args=(session, "right"),
-                    daemon=True,
-                )
-
-                left_thread.start()
-                right_thread.start()
-
-        # Note: we do not start a thread for the waiting player yet; their thread
-        # is only started once they are paired. You could also start immediately,
-        # but then you'd need to block until an opponent arrives.
-
-
-# ------------------------------------------------------------------------------
-# Entry point: start HTTP and game servers
-# ------------------------------------------------------------------------------
-
-def start_game_server() -> None:
+# Server setup
+def establishServer() -> None:
     """
-    Create the TCP server socket (following the instructor's examples),
-    then call accept_and_pair_clients to handle incoming connections.
+    Create the main TCP server socket and accept client connections.
     """
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((HOST, GAME_PORT))
-    server_socket.listen()
+    port = 8888
+    
+    # Start HTTP leaderboard server
+    html_thread = threading.Thread(target=startLeaderboardServer, daemon=True)
+    html_thread.start()
+    
+    # Create TCP server
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((SERVER_IP, port))
+    server.listen(5)
+    print(f"Pong server listening on {SERVER_IP}:{port}")
+    
+    waiting_player = None
+    
+    while True:
+        clientSocket, clientAddress = server.accept()
+        name = clientSocket.recv(1024).decode().strip()
+        
+        if not name.isalnum():
+            print("Rejected invalid name from", clientAddress)
+            clientSocket.close()
+            continue
+        
+        print(f"{name} Connected. | Address: {clientAddress[0]} Port: {clientAddress[1]}")
+        
+        if waiting_player is None:
+            # First player - create game and wait
+            game_id = game_manager.create_game()
+            waiting_player = (name, clientSocket, clientAddress, game_id)
+        else:
+            # Second player - start the game
+            left_name, left_sock, left_addr, game_id = waiting_player
+            
+            # Create threads for both players
+            left_thread = threading.Thread(
+                target=clientThread,
+                args=(left_name, left_sock, left_addr, game_id, True),
+                daemon=True
+            )
+            right_thread = threading.Thread(
+                target=clientThread,
+                args=(name, clientSocket, clientAddress, game_id, False),
+                daemon=True
+            )
+            
+            left_thread.start()
+            right_thread.start()
+            
+            print(f"Starting game {game_id} between {left_name} and {name}")
+            
+            waiting_player = None
 
-    try:
-        accept_and_pair_clients(server_socket)
-    finally:
-        server_socket.close()
+
+# HTTP server for leaderboard
+def startLeaderboardServer() -> None:
+    """Start HTTP server for leaderboard on port 80."""
+    PORT = 80
+    Handler = http.server.SimpleHTTPRequestHandler
+    
+    with socketserver.TCPServer((SERVER_IP, PORT), Handler) as httpd:
+        print("HTTP leaderboard server serving at port", PORT)
+        httpd.serve_forever()
 
 
+# Program entry point
 if __name__ == "__main__":
-    # Start HTTP leaderboard server in the background
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
-    http_thread.start()
-
-    # Start the main game server loop
-    start_game_server()
+    reset_leaderboard()
+    establishServer()
