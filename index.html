@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pong Leaderboard</title>
+    <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #ffffff;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #000000;
+            font-size: 2em;
+            margin-bottom: 30px;
+            font-weight: 600;
+        }
+
+        .container {
+            background-color: #ffffff;
+            border: 2px solid #000000;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background-color: #0066ff;
+            color: #ffffff;
+            font-size: 1em;
+            padding: 15px;
+            font-weight: 600;
+            text-align: left;
+        }
+
+        th:last-child {
+            text-align: right;
+        }
+
+        td {
+            padding: 15px;
+            color: #000000;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        td:first-child {
+            text-align: left;
+        }
+
+        td:last-child {
+            text-align: right;
+            font-weight: 600;
+        }
+
+        tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .rank {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            text-align: center;
+            margin-right: 10px;
+            background-color: #0066ff;
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .loading {
+            text-align: center;
+            color: #000000;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pong Leaderboard</h1>
+   
+    <div class="container">
+        <table id="leaderboard">
+            <thead>
+                <tr>
+                    <th>Player</th>
+                    <th>Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="2" class="loading">Loading scores...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        $(document).ready(function () {
+            $.getJSON("leaderboard.json", function (data) {
+                var leaderboard = '';
+                $.each(data.slice(1), function (key, value) {
+                    leaderboard += '<tr>';
+                    leaderboard += '<td><span class="rank">' + (key + 1) + '</span>' + value.name + '</td>';
+                    leaderboard += '<td>' + value.score + '</td>';
+                    leaderboard += '</tr>';
+                });
+                $('#leaderboard tbody').html(leaderboard);
+            }).fail(function() {
+                $('#leaderboard tbody').html('<tr><td colspan="2" style="color: #ff0000;">Failed to load leaderboard</td></tr>');
+            });
+        });
+    </script>
+</body>
+</html>
