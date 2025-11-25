@@ -21,11 +21,15 @@ from encryption import encrypt_message, decrypt_message
 current_token = None
 current_username = None
 
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose: Authenticate a user with the authentication server for login/register.
+# Pre: The authentication server must be running and reachable at (server_ip, 8081).
+#      encrypt_message and decrypt_message must be correctly implemented and imported.
+# Post: Returns a tuple (success, message, token) where:
+#       - success indicates if authentication succeeded,
+#       - message is a user-facing status string,
+#       - token is a non-empty string if success is True, else "".
 def authenticate(username: str, password: str, action: str, server_ip: str) -> tuple[bool, str, str]:
-    """
-    Authenticate with the auth server.
-    Returns (success, message, token)
-    """
     try:
         auth_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         auth_socket.connect((server_ip, 8081))
@@ -54,8 +58,24 @@ def authenticate(username: str, password: str, action: str, server_ip: str) -> t
     except Exception as e:
         return False, f"Connection error: {str(e)}", ""
 
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose: Display the login screen and handle user login flow.
+# Pre: loginWindow and mainWindow must be initialized tk.Tk or tk.Toplevel instances.
+#      errorLabel must be a tk.Label placed or ready to be placed in loginWindow.
+#      The authentication server must be reachable, and authenticate() must work.
+# Post: On successful login, sets current_token and current_username, closes loginWindow,
+#       and starts the process to join the game via joinServer(). On failure, updates
+#       errorLabel with the appropriate error message.
 def loginScreen(ip: str, port: str, errorLabel: tk.Label, loginWindow: tk.Tk, mainWindow: tk.Tk) -> None:
-    """Show login screen."""
+    
+    # Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+    # Purpose: Attempt to authenticate the user based on form input.
+    # Pre: usernameEntry and passwordEntry must be created and visible in loginWindow.
+    #      errorLabel must be a tk.Label that can be updated.
+    #      ip and port must correspond to running auth/game servers.
+    # Post: If login succeeds, sets global current_token/current_username, destroys
+    #       loginWindow, and initiates joinServer(). If login fails, errorLabel is
+    #       updated with the failure reason and the window remains open.
     def attemptLogin():
         username = usernameEntry.get()
         password = passwordEntry.get()
@@ -97,8 +117,24 @@ def loginScreen(ip: str, port: str, errorLabel: tk.Label, loginWindow: tk.Tk, ma
     
     errorLabel.grid(row=4, column=0, columnspan=2)
 
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose: Display the registration screen and handle new account creation.
+# Pre: registerWindow and mainWindow must be valid tk.Tk/tk.Toplevel instances.
+#      errorLabel must be a tk.Label associated with registerWindow.
+#      The authentication server must support a "register" action via authenticate().
+# Post: On successful registration, informs the user, closes the registration window,
+#       and returns to the authentication choice screen. On failure, updates errorLabel
+#       with the appropriate error message and keeps the window open.
 def registerScreen(ip: str, errorLabel: tk.Label, registerWindow: tk.Tk, mainWindow: tk.Tk) -> None:
-    """Show registration screen."""
+    
+    # Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+    # Purpose: Attempt to register a new user with the auth server.
+    # Pre: usernameEntry, passwordEntry, and confirmEntry must be created in registerWindow.
+    #      errorLabel must be a tk.Label that can display status messages.
+    #      ip must point to a running authentication server endpoint.
+    # Post: If registration is successful, displays success message briefly, closes
+    #       registerWindow, and calls showAuthChoice(). If registration fails or input
+    #       is invalid, updates errorLabel with the corresponding message.
     def attemptRegister():
         username = usernameEntry.get()
         password = passwordEntry.get()
@@ -145,6 +181,12 @@ def registerScreen(ip: str, errorLabel: tk.Label, registerWindow: tk.Tk, mainWin
     
     errorLabel.grid(row=5, column=0, columnspan=2)
 
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose: Present the user with a choice between logging in or registering.
+# Pre: mainWindow must be an active tk.Tk root or parent window.
+#      ip and port must correspond to the running game/auth server.
+# Post: Creates a new authentication choice window; on user interaction it either
+#       opens the login screen or the registration screen and hides the choice window.
 def showAuthChoice(mainWindow: tk.Tk, ip: str, port: str) -> None:
     """Show choice between login and register."""
     authWindow = tk.Toplevel(mainWindow)
@@ -152,6 +194,12 @@ def showAuthChoice(mainWindow: tk.Tk, ip: str, port: str) -> None:
     
     errorLabel = tk.Label(authWindow, text="", fg="red")
     
+    # Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+    # Purpose: Open the login window and hide the authentication choice window.
+    # Pre: authWindow must be displayed, and mainWindow must be a valid parent.
+    #      ip and port must be valid connection parameters.
+    # Post: Hides authWindow and initializes a new loginWindow with error label,
+    #       then calls loginScreen() to populate it.
     def showLogin():
         authWindow.withdraw()
         loginWindow = tk.Toplevel(mainWindow)
@@ -159,6 +207,12 @@ def showAuthChoice(mainWindow: tk.Tk, ip: str, port: str) -> None:
         loginErrorLabel = tk.Label(loginWindow, text="", fg="red")
         loginScreen(ip, port, loginErrorLabel, loginWindow, mainWindow)  # Pass ip and port
     
+    # Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+    # Purpose: Open the registration window and hide the authentication choice window.
+    # Pre: authWindow must be displayed, and mainWindow must be a valid parent.
+    #      ip must be valid for registration via the auth server.
+    # Post: Hides authWindow and initializes a new registerWindow with error label,
+    #       then calls registerScreen() to populate it.
     def showRegister():
         authWindow.withdraw()
         registerWindow = tk.Toplevel(mainWindow)
@@ -173,7 +227,17 @@ def showAuthChoice(mainWindow: tk.Tk, ip: str, port: str) -> None:
     
     errorLabel.pack(pady=10)
 
-
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose:  This version extends that starter implementation with encrypted
+#          client–server communication, sync handling, and play-again/rematch
+#          state management.
+# Pre: client must be a connected socket to the game server.
+#      screenWidth and screenHeight must be positive integers.
+#      playerPaddle must be "left" or "right" to determine paddle assignment.
+#      Pygame must be available, and helper classes (Paddle, Ball, updateScore) must be imported.
+# Post: Manages game state, drawing, input, and communication with the server until
+#       the game (and any rematch sequence) ends. On exit, closes the Pygame window
+#       and stops the loop; the socket is expected to be closed by the caller/server.
 def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
     """Main game loop with encryption."""
     # Pygame inits
@@ -415,7 +479,15 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
     pygame.quit()
 
-
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose: Connect the client to the Pong game server using token-based authentication.
+# Pre: current_token must be a non-None, valid authentication token string.
+#      ip and port must refer to a running game server that expects an encrypted token
+#      first, followed by the normal game protocol.
+#      errorLabel must be a tk.Label; app must be the main Tk root window.
+# Post: On successful connection and authentication, hides the Tk app, runs playGame(),
+#       and then quits the Tk app when the game loop finishes. On failure, displays an
+#       error message on errorLabel and leaves the GUI running.
 def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     """Connect to server with token authentication."""
     global current_token, current_username
@@ -457,6 +529,13 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
         errorLabel.config(text=f"Unable to connect to server: {str(e)}")
         errorLabel.update()
 
+# Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+# Purpose: Create and display the initial server configuration screen with new launch auth flow.
+# Pre: Tkinter must be available; assets/images/logo.png must exist relative to this file.
+#      This function should be called from the main thread as the entry point.
+# Post: Shows a window allowing the user to input server IP and port, then transitions
+#       to authentication choice (login/register). When the game and GUI exit, the
+#       application terminates.
 def startScreen() -> None:
     """Create the starting screen with authentication."""
     app = tk.Tk()
@@ -487,7 +566,13 @@ def startScreen() -> None:
     errorLabel = tk.Label(app, text="", fg="red")
     errorLabel.grid(column=0, row=4, columnspan=2)
 
-    
+    # Author: Shubhanshu Pokharel, Aaron Lin, Ayham Yousef
+    # Purpose: Validate server IP/port entries and transition to authentication choice.
+    # Pre: ipEntry and portEntry must be initialized and visible in the app window.
+    #      errorLabel must be a tk.Label for displaying validation errors.
+    # Post: If server IP is provided, hides the current window and calls showAuthChoice()
+    #       with the entered IP and port. If IP is missing, updates errorLabel and stays
+    #       on the same screen.
     def continueToAuth():
         server_ip = ipEntry.get()
         server_port = portEntry.get()
