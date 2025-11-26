@@ -7,55 +7,8 @@ Group Members & Email Addresses:
     Aaron Lin, ayli222@uky.edu 
     Ayham Yousef, afyo223@uky.edu
 
-Versioning
-==========
-
-Github Link: https://github.com/Sixteen1-6/Pong
-
-General Info
-============
-
-This is a multiplayer Pong game with secure authentication and encrypted 
-communication. The game features user registration/login, real-time gameplay 
-between two players, a play-again feature for rematches, and a web-based 
-leaderboard that tracks wins.
-
-The project uses three servers running simultaneously:
-- Game Server (Port 8080) - Handles gameplay synchronization
-- Authentication Server (Port 8081) - Handles login/registration
-- HTTP Leaderboard Server (Port 80) - Serves leaderboard webpage
 
 
-
-
-
-Download from GitHub
-====================
-
-1. Open terminal/command prompt
-
-2. Navigate to where you want the project:
-   
-   cd /path/to/your/folder
-
-3. Clone the repository:
-   
-   git clone https://github.com/Sixteen1-6/Pong.git
-
-4. Navigate into the project folder:
-   
-   cd Pong
-
-
-
-txtContact Info
-============
-
-Group Members & Email Addresses:
-
-    Shubhanshu Pokharel, spo283@uky.edu 
-    Aaron Lin, ayli222@uky.edu 
-    Ayham Yousef, afyo223@uky.edu
 
 Versioning
 ==========
