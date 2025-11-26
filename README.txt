@@ -25,8 +25,131 @@ The project uses three servers running simultaneously:
 - Authentication Server (Port 8081) - Handles login/registration
 - HTTP Leaderboard Server (Port 80) - Serves leaderboard webpage
 
+
+
+
+
+Download from GitHub
+====================
+
+1. Open terminal/command prompt
+
+2. Navigate to where you want the project:
+   
+   cd /path/to/your/folder
+
+3. Clone the repository:
+   
+   git clone https://github.com/Sixteen1-6/Pong.git
+
+4. Navigate into the project folder:
+   
+   cd Pong
+
+
+
+txtContact Info
+============
+
+Group Members & Email Addresses:
+
+    Shubhanshu Pokharel, spo283@uky.edu 
+    Aaron Lin, ayli222@uky.edu 
+    Ayham Yousef, afyo223@uky.edu
+
+Versioning
+==========
+
+Github Link: https://github.com/Sixteen1-6/Pong
+
+General Info
+============
+
+This is a multiplayer Pong game with secure authentication and encrypted 
+communication. The game features user registration/login, real-time gameplay 
+between two players, a play-again feature for rematches, and a web-based 
+leaderboard that tracks wins.
+
+The project uses three servers running simultaneously:
+- Game Server (Port 8080) - Handles gameplay synchronization
+- Authentication Server (Port 8081) - Handles login/registration
+- HTTP Leaderboard Server (Port 80) - Serves leaderboard webpage
+
+Download from GitHub
+====================
+
+METHOD 1 - Clone with Git:
+--------------------------
+
+1. Open terminal/command prompt
+
+2. Navigate to where you want the project:
+   
+   cd /path/to/your/folder
+
+3. Clone the repository:
+   
+   git clone https://github.com/Sixteen1-6/Pong.git
+
+4. Navigate into the project folder:
+   
+   cd Pong
+
+METHOD 2 - Download ZIP:
+------------------------
+
+1. Go to: https://github.com/Sixteen1-6/Pong
+
+2. Click the green "Code" button
+
+3. Click "Download ZIP"
+
+4. Extract the ZIP file to your desired location
+
+5. Open terminal/command prompt and navigate to the extracted folder:
+   
+   cd /path/to/Pong-main
+
+Virtual Environment Setup
+========================================
+
+Using a virtual environment keeps project dependencies isolated and prevents 
+conflicts with other Python projects.
+
+OPTION 1 - Using Conda
+
+1. Install Anaconda or Miniconda if not already installed:
+   - Download from: https://docs.conda.io/en/latest/miniconda.html
+   - Or use existing conda installation
+
+2. Create a new conda environment for the project:
+   
+   conda create -n pong python=3.11
+
+   (This creates an environment named "pong" with Python 3.11)
+
+3. Activate the environment:
+   
+   conda activate pong
+
+4. Install required packages:
+   
+   pip install -r requirements.txt
+
+5. When done working on the project, deactivate:
+   
+   conda deactivate
+
+6. To use the project again later:
+   
+   conda activate pong
+
+
+
 Install Instructions
 ====================
+
+
 
 1. Install required Python libraries:
 
@@ -35,6 +158,10 @@ Install Instructions
    This installs pygame and cryptography packages.
 
 2. Ensure Python 3.8 or higher is installed on your system.
+
+
+
+
 
 How to Run
 ==========
