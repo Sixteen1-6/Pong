@@ -603,7 +603,10 @@ def establishServer() -> None:
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((SERVER_IP, port))
     server.listen(5)
+    local_ip = socket.gethostbyname(socket.gethostname())
     print(f"Pong server listening on {SERVER_IP}:{port}")
+    print(f"Client IP to use: {local_ip}")
+
     
     waiting_player = None
     
