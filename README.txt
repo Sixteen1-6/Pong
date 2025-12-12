@@ -149,6 +149,8 @@ CLIENT SETUP:
    - Enter a unique alphanumeric username
    - Enter a password (minimum 4 characters)
    - Click "Register"
+   - Run python3 pongClient_auth.py again on new terminal
+
 
 3. Returning users login:
    - Enter your username and password
